@@ -27,3 +27,25 @@ Step 2 - Convert schedule URL into a button
 3. Add an expression column with the following text
 
    `<a href="something" >Schedule</a>`
+
+
+
+Adding an Unlock Button
+
+When a migration slot selected it its automatically locked to prevent further changes. This slot can be unlocked in the client UI but if we need to give a SPOC the ability to unlock a slot without giving them full client access then an Unlock button can be created and added to the page. 
+
+Step 1- Create Unlock Script
+
+1. Create a new User Migration Script
+2. Enable http activation
+3. Paste the below code into the script
+4. Take note of the Script Id and key
+
+
+
+Step 2 - Add Button to DMR
+
+1. Open DMR backing the Schedule page
+2. Add a new Expression column
+3. Paste the below text into new column
+4. Replace the ScriptId & Key from above
