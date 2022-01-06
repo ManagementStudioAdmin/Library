@@ -1,6 +1,6 @@
 #######################  QUICK CONNECTION  ######################
-#Import-Module "c:\ManagementStudio\ManagementStudioApi"
-#Connect-MSApi -ApiUrl "http://ManagementStudio" -ProjectId 1 -UserName "UserName" -Password "Password" -Logfile "C:\ManagementStudio\ScriptLog.txt"
+Import-Module "c:\ManagementStudio\ManagementStudioApi"
+Connect-MSApi -ApiUrl http://localhost -ProjectId 1 -UserName "UserName" -Password "YourPassw0rd!" -Logfile "C:\ManagementStudio\ScriptLog.txt" | Out-Null
 #################################################################
 
 ## Example Input. ($ScriptArgs is provided by MS)
