@@ -1,10 +1,11 @@
 #######################  QUICK CONNECTION  ######################
 Import-Module "c:\ManagementStudio\ManagementStudioApi"
-Connect-MSApi -ApiUrl http://localhost -ProjectId 1 -UserName "UserName" -Password "YourPassw0rd!" -Logfile "C:\ManagementStudio\ScriptLog.txt" | Out-Null
-Set-MSDebugOptions -LogFile "C:\ManagementStudio\ScriptLog.txt" -WriteToFile $true -WriteToHost $true
+$ScriptArgs = @{ LogFile ="C:\ManagementStudio\ScriptLog.txt"; ScriptArg1 = "Hostname: VM*"; ScriptArg3 = "" } #"DontRemoveLinksFromUser, DontRemoveOrphanedDevices"
+Connect-MSApi -ApiUrl http://localhost -ProjectId 1 -UserName "UserName" -Password "YourPassw0rd!" -Logfile $ScriptArgs.LogFile | Out-Null
+Set-MSDebugOptions -LogFile $ScriptArgs.LogFile -WriteToFile $true -WriteToHost $true
 #################################################################
 
-
+ 
 <#
 -----------------------------------------
     Virtual Machine App Links Compressor
@@ -53,10 +54,9 @@ e.g. DontCopyLinksToVm, DontRemoveLinksFromUser, DontRemoveOrphanedDevices
 
 
 ## Read Virtual Device Pattern match from Arg1 (required)
+##  e.g. "Hostname:VM*. CTX*; BpFolderId : 1,3; BlueprintId : 11,23  " 
 $vmDevicePattern = $ScriptArgs.ScriptArg1
 
-# Uncomment to hardcode a pattern here that will override what is in $ScriptArgs.Arg1
-#$vmDevicePattern = "Hostname:Win7*" #  ; BpFolderId : 1,3; BlueprintId : 11,23  " 
 if([string]::IsNullOrWhiteSpace($vmDevicePattern)){ 
     Write-MSDebug -LogText "The 'Virtual Device Pattern' in Arg1 is required. e.g. 'Hostname: VTR*, *CTX*; BlueprintId : 10, 11, 12; BpFolderId: 1, 2, 3'" -ResultStatus Warning
     return
@@ -73,7 +73,6 @@ $debugOptions = $ScriptArgs.ScriptArg3
 if([string]::IsNullOrWhiteSpace($debugOptions)){ $debugOptions = "-" }
 
 #$debugOptions = "DontCopyLinksToVm, DontRemoveLinksFromUser, DontRemoveOrphanedDevices"
-
 $copyLinksToVm = $debugOptions -notlike "*DontCopyLinksToVm*"
 $removeLinksFromUser = $debugOptions -notlike "*DontRemoveLinksFromUser*"
 $removeOrphanedDevices = $debugOptions -notlike "*DontRemoveOrphanedDevices*"
@@ -82,6 +81,8 @@ $removeOrphanedDevices = $debugOptions -notlike "*DontRemoveOrphanedDevices*"
 ## -------------------------------------------------------------------------------------------
 ## Script Start - Do not edit below this line
 ## -------------------------------------------------------------------------------------------
+
+
 
 ##------------------------------------------
 ## Create a Compressor VM Device record
@@ -102,6 +103,8 @@ if($null -eq $compressorVm ) {
     }
 }
 #endregion
+
+
 
 
 ##------------------------------------------
@@ -155,8 +158,10 @@ if($vmDeviceIds.Count -eq 0) {
     Write-MSDebug -LogText "No Virtual Devices found for pattern filter: $($vmDevicePattern)" -ResultStatus Error    
     return
 }
-Write-MSDebug -LogText "Virtual Devices Found: $($vmDeviceIds.Count)" -ResetElapsedTime
+Write-MSDebug -LogText "Virtual Devices Found: $($vmDeviceIds.Count)" -ResetElapsedTime -AddToRunningLog
 #endregion
+
+
 
 
 
@@ -165,81 +170,95 @@ Write-MSDebug -LogText "Virtual Devices Found: $($vmDeviceIds.Count)" -ResetElap
 ##------------------------------------------
 #region User-App links
 
+## Process Devices in Groups of 200
+$batchSize = 200
+$loopCnt = [System.Math]::Ceiling($vmDeviceIds.Count / $batchSize)
+
+
 ## DMR - User-App-Device links where the Device is Virtual and the User & App Ids are present    
-$appTier = New-MSDataminingTier -Module Applications -Fields @("AppId")
-$userTier = New-MSDataminingTier -Module UserMigrations -Fields @("MigrationId")
+for ($i = 0; $i -lt $loopCnt; $i++) 
+{   
+    Write-MSDebug -LogText "Geting Links to Virtual Devices ($($i + 1) of $loopCnt)" -ResetElapsedTime
 
-$linkRpt = Get-MSDeviceDataminingReport -DeviceIds $vmDeviceIds `
-            -Fields @("DeviceId") -AdditionalTiers @($appTier, $userTier) `
-            -Options @("Link_LinkId", "Link_LastUsedInfo", , "Link_StatusInfo") -HeaderFormat InternalName `
+    ## Take a range of Ids from $vmDeviceIds to be used in a smaller DMR    
+    $miniVmDeviceIds = $vmDeviceIds | Select-Object -First $batchSize -Skip ($batchSize * $i)
+ 
+    $linkRpt = Get-MSDeviceDataminingReport -DeviceIds $miniVmDeviceIds `
+            -Fields @("DeviceId") -HeaderFormat InternalName `
+            -Options @("Link_LinkId", "Link_LastUsedInfo", "Link_StatusInfo", "Link_AppId", "Link_MigrationId") `
             -RemoveColumns @("Link_LastUsedDateLabel") `
-            -FilterExpression "(UserMigrations_MigrationId IS NOT NULL) AND (Devices_DeviceId  IS NOT NULL) AND (Applications_AppId IS NOT NULL) AND (Link_LastUsedDate IS NOT NULL)" `
-            -SortExpression "UserMigrations_MigrationId ASC, Applications_AppId ASC, Link_LastUsedDate DESC"
+            -FilterExpression "(Devices_DeviceId <> $($compressorVm.DeviceId)) AND (Devices_DeviceId IS NOT NULL) AND (Link_AppId  IS NOT NULL) AND (Link_MigrationId IS NOT NULL)"
+            
+    Write-MSDebug -LogText "Links to Virtual Devices ($($i + 1) of $loopCnt): $($linkRpt.Status.Rows)" -ElapsedTime -ResetElapsedTime -AddToRunningLog
 
-Write-MSDebug -LogText "Links to Virtual Devices: $($linkRpt.Status.Rows)" -ElapsedTime -ResetElapsedTime
 
-if($linkRpt.Status.Rows -gt 0)
-{
-    ## Extract Links from DMR
-    $copyLinksTo = @{}
-    foreach($row in $linkRpt.Data.Rows)
+    if($linkRpt.Status.Rows -gt 0)
     {
-        $key = "$($row.MigrationId)-$($row.AppId)"
-    
-        ## Create a hash table of new links to create
-        if(-not $copyLinksTo.ContainsKey($key)) 
-        {        
-            $copyLinksTo.Add($key, @{ DeviceId = $compressorVm.DeviceId; AppId = $row.AppId; MigrationId = $row.MigrationId; LastUsedDate = $row.LastUsedDate; }) 
-        }
-        else
+        ## Extract Links from DMR
+        $copyLinksTo = @{}
+        foreach($row in $linkRpt.Data.Rows)
         {
-            ## If link-to-create exists already, update the LastUsedDate if newer
-            if($copyLinksTo[$key].LastUsedDate -lt $row.LastUsedDate){
-                $copyLinksTo[$key].LastUsedDate = $row.LastUsedDate
+            $key = "$($row.Link_MigrationId)-$($row.Link_AppId)"
+        
+            ## Create a hash table of new links to create
+            if(-not $copyLinksTo.ContainsKey($key)) 
+            {        
+                $copyLinksTo.Add($key, @{ DeviceId = $compressorVm.DeviceId; AppId = $row.Link_AppId; MigrationId = $row.Link_MigrationId; LastUsedDate = $row.LastUsedDate; }) 
             }
-        }    
-    }
-    
-    Write-MSDebug -LogText "Links Compressed to : $($copyLinksTo.Count). Saving $($linkRpt.Status.Rows - $copyLinksTo.Count) Links" -ElapsedTime -ResetElapsedTime
-
-
-    ## Create compressed links and remove old redundant links
-    try 
-    {
-        ## Copy User-App Links to 'GOV-VM-Compressor' Device
-        if($copyLinksToVm -eq $true -and $copyLinksTo.Values.Count -gt 0){
-            Import-MSUserAppDeviceLinks -Links $copyLinksTo.Values -LinkAction Create | Out-Null
-            Write-MSDebug -LogText "Links Copied to 'GOV-VM-Compressor' : $($copyLinksTo.Count)" -ElapsedTime -ResetElapsedTime
-        }
-        else {
-            Write-MSDebug -LogText "Links Copy disabled or no links found to move, no action taken"
+            elseif($row.LastUsedDate -ne [DBNull]::Value)
+            {
+                ## If link-to-create exists already, update the LastUsedDate if newer
+                if($copyLinksTo[$key].LastUsedDate -eq [DBNull]::Value -or $copyLinksTo[$key].LastUsedDate -lt $row.LastUsedDate)
+                {
+                    $copyLinksTo[$key].LastUsedDate = $row.LastUsedDate
+                }
+            }
         }
         
+        Write-MSDebug -LogText "Links Compressed to : $($copyLinksTo.Count). Saving $($linkRpt.Status.Rows - $copyLinksTo.Count) Links" -ElapsedTime -AddToRunningLog
 
-        ## Remove the App links on Virtual Devices from Users
-        if($removeLinksFromUser -eq $true)
+
+        ## Create compressed links and remove old redundant links
+        try 
         {
-            ## Remove User-App-Device Links for Virtual Devices
-            $linksToRemove = $linkRpt.Data.Rows | Select-Object -ExpandProperty LinkId
-            Remove-MSModuleLinksByLinkdIds -LinkIds $linksToRemove -Delete | Out-Null
+            ## Copy User-App Links to 'GOV-VM-Compressor' Device
+            if($copyLinksToVm -eq $true -and $copyLinksTo.Values.Count -gt 0)
+            {
+                Write-MSDebug -LogText "Compressing Links...'" -ResetElapsedTime
+                Import-MSUserAppDeviceLinks -Links $copyLinksTo.Values -LinkAction Create -UpdateLogFile $ScriptArgs.LogFile | Out-Null
+                Write-MSDebug -LogText "Complete. Compressed links to '$($compressorVm.HostName)' : $($copyLinksTo.Count)" -ElapsedTime -ResetElapsedTime
+            }
+            else {
+                Write-MSDebug -LogText "Links Copy disabled or no links found to move, no action taken" -AddToRunningLog
+            }
+            
 
-            Write-MSDebug -LogText "User-App-VirtualDevice links removed: $($linksToRemove.Count)" -ElapsedTime -ResetElapsedTime            
+            ## Remove the App links on Virtual Devices from Users
+            if($removeLinksFromUser -eq $true)
+            {
+                ## Remove User-App-Device Links for Virtual Devices
+                $linksToRemove = $linkRpt.Data.Rows | Select-Object -ExpandProperty LinkId
+
+                Write-MSDebug -LogText "Deleteing $($linksToRemove.Count) redundant links...'" -ResetElapsedTime -NoNewline
+                Remove-MSModuleLinksByLinkdIds -LinkIds $linksToRemove -Delete | Out-Null
+                Write-MSDebug -LogText "... Complete'" -ElapsedTime -ResetElapsedTime -AddToRunningLog
+            }
+            else {
+                Write-MSDebug -LogText "Remove links disabled, no action taken" -AddToRunningLog
+            }            
         }
-        else {
-            Write-MSDebug -LogText "Remove links disabled, no action taken"
+        catch {
+            Write-MSDebug -Exception $_
+            return
         }
-        
-    }
-    catch {
-        Write-MSDebug -Exception $_
-        return
-    }
-    finally{
-        $linkRpt = $null
-        $copyLinksTo = $null
-    }
+        finally{
+            $linkRpt = $null
+            $copyLinksTo = $null
+        }
+    }    
 }
 #endregion
+
 
 
 
@@ -252,29 +271,29 @@ if($linkRpt.Status.Rows -gt 0)
 if($removeOrphanedDevices -eq $true)
 {  
     ## DMR - User-App-Device links where the Device is Virtual and the User & App Ids are present    
-    $appTier = New-MSDataminingTier -Module Applications -Fields @("AppId")
-    $userTier = New-MSDataminingTier -Module UserMigrations -Fields @("MigrationId")
-
     $linkRpt = Get-MSDeviceDataminingReport -DeviceIds $vmDeviceIds `
-            -Fields @("DeviceId") -AdditionalTiers @($appTier, $userTier) `
-            -Options @("Link_LinkId", "Link_LastUsedInfo", , "Link_StatusInfo") -HeaderFormat InternalName `
+            -Fields @("DeviceId") -HeaderFormat InternalName `
+            -Options @("Link_LinkId", "Link_LastUsedInfo", "Link_StatusInfo", "Link_AppId", "Link_MigrationId") `
             -RemoveColumns @("Link_LastUsedDateLabel") `
-            -FilterExpression "(UserMigrations_MigrationId IS NOT NULL) AND (Devices_DeviceId  IS NOT NULL) AND (Applications_AppId IS NULL)" `
-            -SortExpression "UserMigrations_MigrationId ASC, Applications_AppId ASC, Link_LastUsedDate DESC"
+            -FilterExpression "(Devices_DeviceId <> $($compressorVm.DeviceId)) AND (Devices_DeviceId IS NOT NULL) AND (Link_AppId  IS NULL) AND (Link_MigrationId IS NOT NULL) "
 
     if($linkRpt.Status.Rows -gt 0)
     {
         $linksToRemove = $linkRpt.Data.Rows | Select-Object -ExpandProperty LinkId
-        Remove-MSModuleLinksByLinkdIds -LinkIds $linksToRemove -Delete | Out-Null
 
-        Write-MSDebug -LogText "Orphaned Virtual Devices removed:  $($linksToRemove.Count)" -ElapsedTime -ResetElapsedTime        
+        Write-MSDebug -LogText "Deleteing $($linksToRemove.Count) Orphaned Virtual Devices...'" -ResetElapsedTime -NoNewline
+        Remove-MSModuleLinksByLinkdIds -LinkIds $linksToRemove -Delete | Out-Null
+        Write-MSDebug -LogText "... Complete'" -ElapsedTime -ResetElapsedTime -AddToRunningLog
     }
     else {
-        Write-MSDebug -LogText "No Orphaned Virtual Devices found to remove"
+        Write-MSDebug -LogText "No Orphaned Virtual Devices found to remove" -AddToRunningLog
     }
 
 }
 #endregion
 
+
+
+
 ## Summary Report for UI
-Write-MSDebug -ResultHeader "Compressor Complete" -ResultStatus Success -LogText "Check log file for details" -WriteToUI $true -WriteToFile $false
+Write-MSDebug -ResultHeader "Compressor Complete" -ResultStatus Success -LogText (Get-MSDebugRunningLog) -WriteToUI $true -WriteToFile $false
