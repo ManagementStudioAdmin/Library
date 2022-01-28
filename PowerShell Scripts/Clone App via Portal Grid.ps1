@@ -5,7 +5,7 @@ A "New Version / Clone" App button is required on the App Portal Grid.
 
 ## SOLUTION ## 
 Create a Custom Button on the App Portal Grid to call a PowerShell script that will use the MS API to clone the App.
-Optionally redirect the User to a details page for the new App to collection additional information.
+Optionally redirect the User to a details page for the new App to collect additional information.
 
 ## STEPS ## 
 1. Go To : Administration\Applications\Surveys
