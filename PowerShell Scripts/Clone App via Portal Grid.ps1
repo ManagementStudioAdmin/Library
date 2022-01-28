@@ -11,7 +11,7 @@ Optionally redirect the User to a details page for the new App to collect additi
 1. Go To : Administration\Applications\Surveys
     Create an App Survey to serve as the 'Details View' of the new App. Take note of its SurveyId
 
-2. Update the code below with the SurveyId of from step one
+2. Update the code below with the SurveyId from step one
 
 3. Chose option 1 or 2 in the script by uncommenting the preferred option
     Option 1 - Redirect to New App Details Page immediately
