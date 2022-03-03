@@ -120,6 +120,7 @@ foreach($pattern in $patternTypes)
     if($sections.Count -ne 2) { continue } ## Invalid pattern
 
     $filterItems = $sections[1].Split(",") | ForEach-Object { $_.Trim() }
+    if($filterItems.Count -eq 1){ $filterItems = @($filterItems) } ## Force fitler items into an array
 
     Write-MSDebug -LogText "Filter: $($sections[0]) - $($sections[1])"
 
@@ -178,7 +179,7 @@ $loopCnt = [System.Math]::Ceiling($vmDeviceIds.Count / $batchSize)
 ## DMR - User-App-Device links where the Device is Virtual and the User & App Ids are present    
 for ($i = 0; $i -lt $loopCnt; $i++) 
 {   
-    Write-MSDebug -LogText "Geting Links to Virtual Devices ($($i + 1) of $loopCnt)" -ResetElapsedTime
+    Write-MSDebug -LogText "Getting Links to Virtual Devices ($($i + 1) of $loopCnt)" -ResetElapsedTime
 
     ## Take a range of Ids from $vmDeviceIds to be used in a smaller DMR    
     $miniVmDeviceIds = $vmDeviceIds | Select-Object -First $batchSize -Skip ($batchSize * $i)
