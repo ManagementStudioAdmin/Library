@@ -22,9 +22,13 @@ This script will create single Device to represent all VMs and copy all a Userâ€
 The User will still retain the knowledge of which Apps they used on a VM and when they last used them. 
 
 VERSION
+v0.2 - 2022-04-28
 v0.1 - 2022-01-13
 
 Change Log:
+v0.2 - Allow script to be called from Invoke-MSScript
+        e.g. Invoke-MSScript -Module Devices -ScriptId 99 -TargetId 0 -Args1 "BlueprintId: 999" -Args2 "CitrixServer01LNK" 
+v0.1 - Initial Release
 
 ------------------------------------------------
 
@@ -57,6 +61,10 @@ e.g. DontCopyLinksToVm, DontRemoveLinksFromUser, DontRemoveOrphanedDevices
 ##  e.g. "Hostname:VM*. CTX*; BpFolderId : 1,3; BlueprintId : 11,23  " 
 $vmDevicePattern = $ScriptArgs.ScriptArg1
 
+## If called via Invoke-MSScript use the those Args as an override
+if(-not [string]::IsNullOrWhiteSpace($ScriptArgs.EventArg1)){ $vmDevicePattern = $ScriptArgs.EventArg1 }
+
+
 if([string]::IsNullOrWhiteSpace($vmDevicePattern)){ 
     Write-MSDebug -LogText "The 'Virtual Device Pattern' in Arg1 is required. e.g. 'Hostname: VTR*, *CTX*; BlueprintId : 10, 11, 12; BpFolderId: 1, 2, 3'" -ResultStatus Warning
     return
@@ -67,10 +75,20 @@ if([string]::IsNullOrWhiteSpace($vmDevicePattern)){
 $vmDeviceName = $ScriptArgs.ScriptArg2
 if([string]::IsNullOrWhiteSpace($vmDeviceName)){ $vmDeviceName = "MS-Link-Compressor-Device" }
 
+## If called via Invoke-MSScript use the those Args as an override
+if(-not [string]::IsNullOrWhiteSpace($ScriptArgs.EventArg2)){ $vmDeviceName = $ScriptArgs.EventArg2 }
+
 
 ## Read any Debug / Testing Options from Arg3 (optional)
 $debugOptions = $ScriptArgs.ScriptArg3
+
+## If called via Invoke-MSScript use the those Args as an override
+if(-not [string]::IsNullOrWhiteSpace($ScriptArgs.EventArg3)){ $debugOptions = $ScriptArgs.EventArg3 }
+
 if([string]::IsNullOrWhiteSpace($debugOptions)){ $debugOptions = "-" }
+
+
+
 
 #$debugOptions = "DontCopyLinksToVm, DontRemoveLinksFromUser, DontRemoveOrphanedDevices"
 $copyLinksToVm = $debugOptions -notlike "*DontCopyLinksToVm*"
@@ -82,6 +100,10 @@ $removeOrphanedDevices = $debugOptions -notlike "*DontRemoveOrphanedDevices*"
 ## Script Start - Do not edit below this line
 ## -------------------------------------------------------------------------------------------
 
+Write-MSDebug -LogText "Configuration $($vmDevicePattern)" -NoDateStamp
+Write-MSDebug -LogText "VM Device Pattern: $($vmDevicePattern)" -NoDateStamp
+Write-MSDebug -LogText "VM Device Name: $($vmDeviceName)" -NoDateStamp
+Write-MSDebug -LogText "Actions`r`n  Copy Links To VM: $($copyLinksToVm)`r`n  Remove Links From User: $($removeLinksFromUser)`r`n  Remove Orphaned Devices: $($removeOrphanedDevices)" -ExtraNewLine -NoDateStamp
 
 
 ##------------------------------------------
