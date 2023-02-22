@@ -26,50 +26,46 @@
 ## Script Start
 #----------------------------------------------------------------
 
-## Get a list of Email addresses of VIPs to NOT email
-##   Ignore users with a Blank email address or VIPs that have CustomFlag1 set to true 
-$rpt = Get-MSDataminingReport -Module UserMigrations -All $true -HeaderFormat PrefixedName -Fields @('Email', 'CustomFlag1') -FilterExpression "UserMigrations_Email <> '' AND 
-UserMigrations_CustomFlag1 = 1"
+## List of emails not to send
+$blockedEmails = @()
 
-## No email addresses found to ignore
-if($rpt.Status.Rows -eq 0){ return }
-
-## Convert DMR result to list of Email Address
-$blockedEmailAddresses = $rpt.Data | Select-Object -ExpandProperty UserMigrations_Email
-
-## Alt Option, Manual List of Email Addresses that MS will not sent emails too. 
-#$blockedEmailAddresses = @('exmaple1@managementstudio.com', 'exmaple2@managementstudio.com')
-
-
-$ignoreEmails = @()
-
-foreach($emailObj in $ScriptArgs.EventData)
+## Extract a list of User Ids that are being Emailed
+$userIds = @()
+foreach($item in $ScriptArgs.EventData)
 {
-    foreach($email in $blockedEmailAddresses)
-    {
-        try
-        {
-            ## If this ToAddress contains one of the Blocked Email Addresses then ignore this email
-            $mailMatch = '*' + $email + '*'
-            if($emailObj.ToAddress -like $mailMatch) 
-            {
-                ## Add this email to the ignore list to return to MS
-                $ignoreEmails += @{ 
-                    EmailId = $emailObj.EmailId; 
-                    AddToQueue = $false; 
-                }
-                
-                ## Optionally log this blocked email to the script log
-                Write-MSDebug -LogText "Blocked Email to $($emailObj.ToAddress)"
-
-                break
-            }        
-        }
-        catch{
-            Write-MSDebug -Exception $_
-        }
-    }
+    if($item.ModuleId -ne 2) { continue }
+    $userIds += $item.InstanceId
 }
 
-## Return a list of Emails to MS to ignore
-return $ignoreEmails
+
+## ------------------------------------------------
+## Rule Example - Don't email Users that are VIPs
+## ------------------------------------------------
+
+## Get a list of UserIds we are not allowed to Email
+##   i.e. Users that have CustomFlag1 set to true 
+$rpt = Get-MSUserMigrationDataminingReport -MigrationIds $userIds -Fields @("Id", "CustomFlag1") -HeaderFormat PrefixedName -FilterExpression "UserMigrations_CustomFlag1 = 1"
+
+## No Users found to not email, exit
+if($rpt.Status.Rows -eq 0){ return }
+
+## Convert DMR result to a list of UserIds we can't email
+$userIdsToNotEmail = $rpt.Data | Select-Object -ExpandProperty UserMigrations_Id 
+
+
+## For each email MS is about to send, check if the target User is on the blocked list
+foreach($item in $ScriptArgs.EventData)
+{
+    ## If this is not a User email then skip the Id check (slightly more efficient)
+    if($item.ModuleId -ne 2) { continue }
+
+    ## Is this email being sent to a blocked User? 
+    if($userIdsToNotEmail -contains $item.InstanceId) 
+    { 
+        $blockedEmails += @{ EmailId = $item.EmailId; AddToQueue = $false; }     
+        Add-MSUserMigrationNote -Id $item.InstanceId -NoteText "The Email: '$($item.Subject)' was blocked from being sent. MS is not allowed to Email Users with CustomFlag1 set to True." | Out-Null
+        Write-MSDebug -LogText "The Email: '$($item.Subject)' was blocked from being sent to UserId $($item.InstanceId). MS is not allowed to Email Users with CustomFlag1 set to True"
+    }        
+}
+
+return $blockedEmails
