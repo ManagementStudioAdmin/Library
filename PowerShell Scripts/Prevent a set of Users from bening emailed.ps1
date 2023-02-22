@@ -38,7 +38,7 @@ if($rpt.Status.Rows -eq 0){ return }
 $blockedEmailAddresses = $rpt.Data | Select-Object -ExpandProperty UserMigrations_Email
 
 ## Alt Option, Manual List of Email Addresses that MS will not sent emails too. 
-#$blockedEmailAddresses = @('richard.hynes@managementstudio.com', 'ben.coook@managementstudio.com')
+#$blockedEmailAddresses = @('exmaple1@managementstudio.com', 'exmaple2@managementstudio.com')
 
 
 $ignoreEmails = @()
@@ -61,6 +61,8 @@ foreach($emailObj in $ScriptArgs.EventData)
                 
                 ## Optionally log this blocked email to the script log
                 Write-MSDebug -LogText "Blocked Email to $($emailObj.ToAddress)"
+
+                break
             }        
         }
         catch{
